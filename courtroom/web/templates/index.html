@@ -1,0 +1,152 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>⚖️ 庭审系统 - Courtroom Collaboration</title>
+    <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+    <div class="container">
+        <header>
+            <h1>⚖️ 庭审系统</h1>
+            <p class="subtitle">Courtroom Collaboration - 程序正义的多 Agent 协作</p>
+        </header>
+
+        <nav class="tabs">
+            <button class="tab active" data-tab="dashboard">📊 仪表盘</button>
+            <button class="tab" data-tab="motions">📋 动议列表</button>
+            <button class="tab" data-tab="new-motion">➕ 提交动议</button>
+            <button class="tab" data-tab="evidence">📎 证据管理</button>
+        </nav>
+
+        <!-- 仪表盘 -->
+        <div id="dashboard" class="tab-content active">
+            <h2>📊 统计概览</h2>
+            <div class="stats-grid">
+                <div class="stat-card">
+                    <div class="stat-value" id="total-cases">-</div>
+                    <div class="stat-label">总案件数</div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-value" id="pending-cases">-</div>
+                    <div class="stat-label">待审理</div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-value" id="approved-cases">-</div>
+                    <div class="stat-label">已批准</div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-value" id="rejected-cases">-</div>
+                    <div class="stat-label">已驳回</div>
+                </div>
+            </div>
+
+            <h3>📅 最近案件</h3>
+            <div id="recent-cases" class="case-list"></div>
+        </div>
+
+        <!-- 动议列表 -->
+        <div id="motions" class="tab-content">
+            <h2>📋 所有动议</h2>
+            <div class="filters">
+                <select id="filter-status">
+                    <option value="">所有状态</option>
+                    <option value="pending">待审理</option>
+                    <option value="in_trial">审理中</option>
+                    <option value="deliberation">评议中</option>
+                    <option value="decided">已判决</option>
+                </select>
+                <select id="filter-type">
+                    <option value="">所有类型</option>
+                    <option value="feature">新功能</option>
+                    <option value="bugfix">Bug修复</option>
+                    <option value="refactor">重构</option>
+                    <option value="performance">性能优化</option>
+                    <option value="security">安全</option>
+                </select>
+            </div>
+            <div id="motion-list" class="case-list"></div>
+        </div>
+
+        <!-- 提交动议 -->
+        <div id="new-motion" class="tab-content">
+            <h2>➕ 提交新动议</h2>
+            <form id="motion-form">
+                <div class="form-group">
+                    <label>动议标题 *</label>
+                    <input type="text" name="title" required placeholder="例如：添加 Redis 缓存层">
+                </div>
+
+                <div class="form-group">
+                    <label>动议类型 *</label>
+                    <select name="motion_type" required>
+                        <option value="feature">新功能</option>
+                        <option value="bugfix">Bug修复</option>
+                        <option value="refactor">重构</option>
+                        <option value="performance">性能优化</option>
+                        <option value="security">安全</option>
+                        <option value="documentation">文档</option>
+                        <option value="test">测试</option>
+                    </select>
+                </div>
+
+                <div class="form-group">
+                    <label>描述 *</label>
+                    <textarea name="description" required rows="4" placeholder="详细描述这个动议的背景和目的"></textarea>
+                </div>
+
+                <div class="form-group">
+                    <label>提议的变更（每行一个）</label>
+                    <textarea name="proposed_changes" rows="4" placeholder="例如：&#10;- 集成 Redis 客户端&#10;- 添加缓存逻辑到用户查询"></textarea>
+                </div>
+
+                <div class="form-group">
+                    <label>影响的文件（每行一个）</label>
+                    <textarea name="affected_files" rows="3" placeholder="例如：&#10;backend/services/cache.py&#10;backend/requirements.txt"></textarea>
+                </div>
+
+                <div class="form-group">
+                    <label>已知风险（每行一个）</label>
+                    <textarea name="risks" rows="3" placeholder="例如：&#10;- 缓存一致性问题&#10;- 增加系统复杂度"></textarea>
+                </div>
+
+                <div class="form-group">
+                    <label>预期收益（每行一个）</label>
+                    <textarea name="benefits" rows="3" placeholder="例如：&#10;- 响应时间减少 80%&#10;- 数据库负载降低"></textarea>
+                </div>
+
+                <div class="form-group">
+                    <label>优先级</label>
+                    <input type="range" name="priority" min="1" max="10" value="5">
+                    <span id="priority-value">5</span>
+                </div>
+
+                <button type="submit" class="btn btn-primary">提交动议</button>
+            </form>
+        </div>
+
+        <!-- 证据管理 -->
+        <div id="evidence" class="tab-content">
+            <h2>📎 证据管理</h2>
+            <div class="form-group">
+                <label>选择案件</label>
+                <select id="evidence-case-select">
+                    <option value="">请选择案件</option>
+                </select>
+            </div>
+            <div id="evidence-list" class="evidence-list"></div>
+        </div>
+    </div>
+
+    <!-- 动议详情模态框 -->
+    <div id="motion-modal" class="modal">
+        <div class="modal-content">
+            <span class="close">&times;</span>
+            <div id="motion-detail"></div>
+        </div>
+    </div>
+
+    <script src="/static/app.js"></script>
+</body>
+</html>
