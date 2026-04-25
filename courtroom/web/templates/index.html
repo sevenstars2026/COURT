@@ -3,150 +3,263 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>⚖️ 庭审系统 - Courtroom Collaboration</title>
+    <title>⚖️ 庭审系统</title>
     <link rel="stylesheet" href="/static/style.css">
 </head>
 <body>
-    <div class="container">
-        <header>
-            <h1>⚖️ 庭审系统</h1>
-            <p class="subtitle">Courtroom Collaboration - 程序正义的多 Agent 协作</p>
-        </header>
+<div class="app">
+    <!-- 顶栏 -->
+    <header>
+        <h1>⚖️ 庭审系统</h1>
+        <span class="subtitle">Courtroom Collaboration</span>
+    </header>
 
-        <nav class="tabs">
-            <button class="tab active" data-tab="dashboard">📊 仪表盘</button>
-            <button class="tab" data-tab="motions">📋 动议列表</button>
-            <button class="tab" data-tab="new-motion">➕ 提交动议</button>
-            <button class="tab" data-tab="evidence">📎 证据管理</button>
-        </nav>
+    <!-- 标签页 -->
+    <nav class="tabs">
+        <button class="tab active" data-tab="hall">⚖️ 庭审大厅</button>
+        <button class="tab" data-tab="discuss">💬 自由讨论</button>
+        <button class="tab" data-tab="config">🔌 接入外部 Agent</button>
+        <button class="tab" data-tab="profile">👤 用户设置</button>
+    </nav>
 
-        <!-- 仪表盘 -->
-        <div id="dashboard" class="tab-content active">
-            <h2>📊 统计概览</h2>
-            <div class="stats-grid">
-                <div class="stat-card">
-                    <div class="stat-value" id="total-cases">-</div>
-                    <div class="stat-label">总案件数</div>
-                </div>
-                <div class="stat-card">
-                    <div class="stat-value" id="pending-cases">-</div>
-                    <div class="stat-label">待审理</div>
-                </div>
-                <div class="stat-card">
-                    <div class="stat-value" id="approved-cases">-</div>
-                    <div class="stat-label">已批准</div>
-                </div>
-                <div class="stat-card">
-                    <div class="stat-value" id="rejected-cases">-</div>
-                    <div class="stat-label">已驳回</div>
-                </div>
+    <!-- ============ 庭审大厅 ============ -->
+    <div id="hall" class="tab-content active">
+
+        <!-- Agent 状态卡片 -->
+        <section>
+            <h2>🤖 Agent 状态</h2>
+            <div id="agent-bar" class="agent-bar">
+                <div class="agent-card"><div class="agent-icon">👨‍⚖️</div><div class="agent-name">检察官</div><div class="agent-mode" id="mode-prosecutor">● 规则引擎</div></div>
+                <div class="agent-card"><div class="agent-icon">👩‍⚖️</div><div class="agent-name">辩护律师</div><div class="agent-mode" id="mode-defender">● 规则引擎</div></div>
+                <div class="agent-card"><div class="agent-icon">⚖️</div><div class="agent-name">法官</div><div class="agent-mode" id="mode-judge">● 规则引擎</div></div>
+                <div class="agent-card"><div class="agent-icon">🗳️</div><div class="agent-name">陪审团</div><div class="agent-mode" id="mode-jury">● 规则引擎</div></div>
+                <div class="agent-card"><div class="agent-icon">📝</div><div class="agent-name">书记员</div><div class="agent-mode" id="mode-court_reporter">● 规则引擎</div></div>
+                <div class="agent-card"><div class="agent-icon">🔍</div><div class="agent-name">代码分析师</div><div class="agent-mode" id="mode-code_analyst">● 规则引擎</div></div>
+                <div class="agent-card"><div class="agent-icon">⚙️</div><div class="agent-name">执行工程师</div><div class="agent-mode" id="mode-execution_engineer">● Claude Code</div></div>
+                <div class="agent-card"><div class="agent-icon">✅</div><div class="agent-name">质量检查员</div><div class="agent-mode" id="mode-qa_inspector">● 规则引擎</div></div>
             </div>
+        </section>
 
-            <h3>📅 最近案件</h3>
-            <div id="recent-cases" class="case-list"></div>
+        <!-- 两列布局：提交动议 + 案件列表 -->
+        <div class="hall-columns">
+            <!-- 左列：提交动议 -->
+            <section class="hall-left">
+                <h2>📝 提交动议</h2>
+                <form id="motion-form">
+                    <div class="form-group">
+                        <label>标题</label>
+                        <input type="text" id="motion-title" required placeholder="例如：添加 Redis 缓存层">
+                    </div>
+                    <div class="form-row">
+                        <div class="form-group" style="flex:1">
+                            <label>类型</label>
+                            <select id="motion-type">
+                                <option value="new_feature">新功能</option>
+                                <option value="bug_fix">Bug 修复</option>
+                                <option value="refactor">重构</option>
+                                <option value="performance">性能优化</option>
+                                <option value="security">安全</option>
+                                <option value="architecture">架构</option>
+                            </select>
+                        </div>
+                        <div class="form-group" style="flex:1">
+                            <label>优先级</label>
+                            <select id="motion-priority">
+                                <option value="1">1 - 低</option>
+                                <option value="3">3</option>
+                                <option value="5" selected>5 - 普通</option>
+                                <option value="7">7</option>
+                                <option value="10">10 - 紧急</option>
+                            </select>
+                        </div>
+                    </div>
+                    <div class="form-group">
+                        <label>描述</label>
+                        <textarea id="motion-desc" rows="3" required placeholder="描述变更的背景和目的"></textarea>
+                    </div>
+                    <div class="form-group">
+                        <label>上传附件（可选）</label>
+                        <input type="file" id="motion-file" accept=".txt,.md,.json,.py,.js,.java,.yaml,.yml,.toml,.pdf,.doc,.docx" multiple>
+                        <div id="file-info" style="font-size:.82rem;color:var(--gray-500);margin-top:4px;"></div>
+                    </div>
+                    <button type="submit" class="btn btn-primary" id="btn-submit">提交动议</button>
+                </form>
+                <div id="submit-result" class="msg-box" style="display:none"></div>
+            </section>
+
+            <!-- 右列：案件列表 -->
+            <section class="hall-right">
+                <h2>📋 案件列表</h2>
+                <div id="case-list" class="case-list">
+                    <div class="empty-state">暂无案件，提交动议后显示</div>
+                </div>
+            </section>
         </div>
+    </div>
 
-        <!-- 动议列表 -->
-        <div id="motions" class="tab-content">
-            <h2>📋 所有动议</h2>
-            <div class="filters">
-                <select id="filter-status">
-                    <option value="">所有状态</option>
-                    <option value="pending">待审理</option>
-                    <option value="in_trial">审理中</option>
-                    <option value="deliberation">评议中</option>
-                    <option value="decided">已判决</option>
-                </select>
-                <select id="filter-type">
-                    <option value="">所有类型</option>
-                    <option value="feature">新功能</option>
-                    <option value="bugfix">Bug修复</option>
-                    <option value="refactor">重构</option>
-                    <option value="performance">性能优化</option>
-                    <option value="security">安全</option>
-                </select>
-            </div>
-            <div id="motion-list" class="case-list"></div>
-        </div>
+    <!-- ============ 自由讨论 ============ -->
+    <div id="discuss" class="tab-content">
+        <section>
+            <h2>💬 自由讨论</h2>
+            <p class="help-text">直接提问，所有 Agent 会同时回答你。不需要走庭审流程，适合问任何问题。</p>
 
-        <!-- 提交动议 -->
-        <div id="new-motion" class="tab-content">
-            <h2>➕ 提交新动议</h2>
-            <form id="motion-form">
-                <div class="form-group">
-                    <label>动议标题 *</label>
-                    <input type="text" name="title" required placeholder="例如：添加 Redis 缓存层">
-                </div>
-
-                <div class="form-group">
-                    <label>动议类型 *</label>
-                    <select name="motion_type" required>
-                        <option value="feature">新功能</option>
-                        <option value="bugfix">Bug修复</option>
-                        <option value="refactor">重构</option>
-                        <option value="performance">性能优化</option>
-                        <option value="security">安全</option>
-                        <option value="documentation">文档</option>
-                        <option value="test">测试</option>
-                    </select>
-                </div>
-
-                <div class="form-group">
-                    <label>描述 *</label>
-                    <textarea name="description" required rows="4" placeholder="详细描述这个动议的背景和目的"></textarea>
-                </div>
-
-                <div class="form-group">
-                    <label>提议的变更（每行一个）</label>
-                    <textarea name="proposed_changes" rows="4" placeholder="例如：&#10;- 集成 Redis 客户端&#10;- 添加缓存逻辑到用户查询"></textarea>
-                </div>
-
-                <div class="form-group">
-                    <label>影响的文件（每行一个）</label>
-                    <textarea name="affected_files" rows="3" placeholder="例如：&#10;backend/services/cache.py&#10;backend/requirements.txt"></textarea>
-                </div>
-
-                <div class="form-group">
-                    <label>已知风险（每行一个）</label>
-                    <textarea name="risks" rows="3" placeholder="例如：&#10;- 缓存一致性问题&#10;- 增加系统复杂度"></textarea>
-                </div>
-
-                <div class="form-group">
-                    <label>预期收益（每行一个）</label>
-                    <textarea name="benefits" rows="3" placeholder="例如：&#10;- 响应时间减少 80%&#10;- 数据库负载降低"></textarea>
-                </div>
-
-                <div class="form-group">
-                    <label>优先级</label>
-                    <input type="range" name="priority" min="1" max="10" value="5">
-                    <span id="priority-value">5</span>
-                </div>
-
-                <button type="submit" class="btn btn-primary">提交动议</button>
-            </form>
-        </div>
-
-        <!-- 证据管理 -->
-        <div id="evidence" class="tab-content">
-            <h2>📎 证据管理</h2>
             <div class="form-group">
-                <label>选择案件</label>
-                <select id="evidence-case-select">
-                    <option value="">请选择案件</option>
-                </select>
+                <label>你的问题 / 需求</label>
+                <textarea id="discuss-question" rows="4" placeholder="例如：如何设置笔记本合盖不休眠？&#10;或者：帮我优化这段代码..."></textarea>
             </div>
-            <div id="evidence-list" class="evidence-list"></div>
+            <div class="form-group">
+                <label>上传附件（可选）</label>
+                <input type="file" id="discuss-file" multiple>
+                <div id="discuss-file-info" style="font-size:.82rem;color:var(--gray-500);margin-top:4px;"></div>
+            </div>
+            <button class="btn btn-primary" id="btn-discuss" onclick="startDiscuss()">🚀 开始讨论</button>
+            <div id="discuss-status" class="msg-box" style="display:none"></div>
+        </section>
+
+        <div id="discuss-results" style="display:none;margin-top:14px;">
+            <div class="discuss-grid">
+                <div class="discuss-card" data-agent="prosecutor">
+                    <div class="discuss-header">👨‍⚖️ 检察官 · 方案提出</div>
+                    <div class="discuss-body" id="discuss-prosecutor"><span class="dim">等待回答...</span></div>
+                </div>
+                <div class="discuss-card" data-agent="defender">
+                    <div class="discuss-header">👩‍⚖️ 辩护律师 · 风险审查</div>
+                    <div class="discuss-body" id="discuss-defender"><span class="dim">等待回答...</span></div>
+                </div>
+                <div class="discuss-card" data-agent="jury">
+                    <div class="discuss-header">🗳️ 陪审团 · 专家补充</div>
+                    <div class="discuss-body" id="discuss-jury"><span class="dim">等待回答...</span></div>
+                </div>
+            </div>
+            <div id="discuss-summary-area" style="margin-top:14px;display:none;">
+                <div class="discuss-card summary">
+                    <div class="discuss-header">⚖️ 法官 · 综合总结</div>
+                    <div class="discuss-body" id="discuss-summary"></div>
+                </div>
+            </div>
         </div>
     </div>
 
-    <!-- 动议详情模态框 -->
-    <div id="motion-modal" class="modal">
-        <div class="modal-content">
-            <span class="close">&times;</span>
-            <div id="motion-detail"></div>
-        </div>
+    <!-- ============ 接入外部 Agent ============ -->
+    <div id="config" class="tab-content">
+
+        <!-- 全局 API 配置 -->
+        <section>
+            <h2>🌐 全局 API 配置</h2>
+            <p class="help-text">配置后庭审将调用你的 API 替代内置规则引擎。兼容任何 OpenAI 格式的 API（如 OpenAI、Ollama、vLLM）。</p>
+
+            <div id="api-msg" class="msg-box" style="display:none"></div>
+
+            <div class="form-group">
+                <label>API 地址</label>
+                <input type="text" id="api-url" placeholder="例如：https://api.openai.com/v1">
+            </div>
+            <div class="form-group">
+                <label>API Key</label>
+                <div class="key-row">
+                    <input type="password" id="api-key" placeholder="sk-...">
+                    <button type="button" class="btn btn-sm" onclick="toggleKey()">显示</button>
+                </div>
+            </div>
+            <div class="form-group">
+                <label>模型名称</label>
+                <input type="text" id="api-model" placeholder="gpt-4o-mini">
+            </div>
+            <div class="btn-row">
+                <button class="btn btn-secondary" onclick="testApi()">🔌 测试连接</button>
+                <button class="btn btn-primary" onclick="saveApi()">💾 保存</button>
+            </div>
+        </section>
+
+        <hr>
+
+        <!-- 按 Agent 切换 -->
+        <section>
+            <h2>🎯 Agent 接入开关</h2>
+            <p class="help-text">打开后该 Agent 将使用上面的外部 API 生成论点，关闭则使用内置规则引擎。</p>
+
+            <div id="agent-switches">
+                <div class="switch-group" data-agent="prosecutor">
+                    <div class="switch-row">
+                        <span class="switch-label">👨‍⚖️ 检察官</span>
+                        <label class="toggle"><input type="checkbox"><span class="sl"></span></label>
+                        <span class="switch-mode">规则引擎</span>
+                    </div>
+                    <div class="agent-api-fields">
+                        <input class="agent-url" placeholder="API 地址（留空用全局）">
+                        <input class="agent-key" type="password" placeholder="API Key（留空用全局）">
+                        <input class="agent-model" placeholder="模型（留空用全局）">
+                    </div>
+                </div>
+                <div class="switch-group" data-agent="defender">
+                    <div class="switch-row">
+                        <span class="switch-label">👩‍⚖️ 辩护律师</span>
+                        <label class="toggle"><input type="checkbox"><span class="sl"></span></label>
+                        <span class="switch-mode">规则引擎</span>
+                    </div>
+                    <div class="agent-api-fields">
+                        <input class="agent-url" placeholder="API 地址（留空用全局）">
+                        <input class="agent-key" type="password" placeholder="API Key（留空用全局）">
+                        <input class="agent-model" placeholder="模型（留空用全局）">
+                    </div>
+                </div>
+                <div class="switch-group" data-agent="judge">
+                    <div class="switch-row">
+                        <span class="switch-label">⚖️ 法官</span>
+                        <label class="toggle"><input type="checkbox"><span class="sl"></span></label>
+                        <span class="switch-mode">规则引擎</span>
+                    </div>
+                    <div class="agent-api-fields">
+                        <input class="agent-url" placeholder="API 地址（留空用全局）">
+                        <input class="agent-key" type="password" placeholder="API Key（留空用全局）">
+                        <input class="agent-model" placeholder="模型（留空用全局）">
+                    </div>
+                </div>
+                <div class="switch-group" data-agent="jury">
+                    <div class="switch-row">
+                        <span class="switch-label">🗳️ 陪审团</span>
+                        <label class="toggle"><input type="checkbox"><span class="sl"></span></label>
+                        <span class="switch-mode">规则引擎</span>
+                    </div>
+                    <div class="agent-api-fields">
+                        <input class="agent-url" placeholder="API 地址（留空用全局）">
+                        <input class="agent-key" type="password" placeholder="API Key（留空用全局）">
+                        <input class="agent-model" placeholder="模型（留空用全局）">
+                    </div>
+                </div>
+                <div class="switch-row disabled" data-agent="court_reporter">
+                    <span class="switch-label">📝 书记员</span>
+                    <span class="switch-mode" style="color:#999">固定规则引擎</span>
+                </div>
+            </div>
+        </section>
     </div>
 
-    <script src="/static/app.js"></script>
+    <!-- ============ 用户设置 ============ -->
+    <div id="profile" class="tab-content">
+        <section>
+            <h2>👤 用户头像设置</h2>
+            <p class="help-text">上传你的个人头像，支持 PNG、JPG、GIF、WebP 格式，最大 5MB。</p>
+
+            <div id="avatar-msg" class="msg-box" style="display:none"></div>
+
+            <div class="avatar-container">
+                <div class="avatar-preview">
+                    <img id="avatar-img" src="/static/default-avatar.png" alt="用户头像" onerror="this.src='data:image/svg+xml,%3Csvg xmlns=%22http://www.w3.org/2000/svg%22 width=%22120%22 height=%22120%22%3E%3Crect fill=%22%23e5e7eb%22 width=%22120%22 height=%22120%22/%3E%3Ctext x=%2250%25%22 y=%2250%25%22 dominant-baseline=%22middle%22 text-anchor=%22middle%22 font-size=%2248%22 fill=%22%236b7280%22%3E👤%3C/text%3E%3C/svg%3E'">
+                </div>
+                <div class="avatar-controls">
+                    <input type="file" id="avatar-file" accept="image/png,image/jpeg,image/jpg,image/gif,image/webp" style="display:none">
+                    <button class="btn btn-primary" onclick="document.getElementById('avatar-file').click()">📤 选择头像</button>
+                    <button class="btn btn-secondary" id="btn-upload-avatar" onclick="uploadAvatar()" disabled>💾 上传</button>
+                    <button class="btn btn-danger" id="btn-delete-avatar" onclick="deleteAvatar()" style="display:none">🗑️ 删除</button>
+                </div>
+                <div id="avatar-info" class="avatar-info"></div>
+            </div>
+        </section>
+    </div>
+</div>
+
+<script src="https://cdn.socket.io/4.5.4/socket.io.min.js"></script>
+<script src="/static/app.js"></script>
 </body>
 </html>

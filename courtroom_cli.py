@@ -1,6 +1,9 @@
 """
 庭审系统 CLI - 命令行接口
 """
+from dotenv import load_dotenv
+load_dotenv()
+
 import sys
 import argparse
 from pathlib import Path

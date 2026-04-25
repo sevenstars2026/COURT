@@ -1,0 +1,31 @@
+{
+  "url": "https://cc-vibe.com/v1",
+  "api_key": "sk-acb01cda1f67b4dc71a22c9a58fb2068be1abba6709845d905a1fa2a991e8c1c",
+  "model": "claude-opus-4-7",
+  "agents": {
+    "prosecutor": {
+      "mode": "api",
+      "url": "https://yunwu.ai/v1",
+      "api_key": "sk-lmpMnHvWglckbOwUXMkF91wBjx63ibgLcUcP8vR5nsdKvXF4",
+      "model": "gpt-5.4"
+    },
+    "defender": {
+      "mode": "api",
+      "url": "",
+      "api_key": "",
+      "model": ""
+    },
+    "judge": {
+      "mode": "api",
+      "url": "https://api.deepseek.com",
+      "api_key": "sk-8641ee02844d4994a9e1467f4b626c28",
+      "model": "deepseek-v4-pro"
+    },
+    "jury": {
+      "mode": "api",
+      "url": "",
+      "api_key": "",
+      "model": ""
+    }
+  }
+}

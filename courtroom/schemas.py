@@ -130,6 +130,24 @@ class JuryVote(BaseModel):
     timestamp: datetime = Field(default_factory=datetime.now, description="投票时间")
 
 
+class FunctionDesign(BaseModel):
+    """函数设计"""
+    file: str = Field(..., description="文件路径")
+    function_name: str = Field(..., description="函数名")
+    signature: str = Field(..., description="完整的函数签名")
+    purpose: str = Field(..., description="函数职责")
+    key_logic: str = Field(..., description="关键逻辑描述或伪代码")
+    variables: List[str] = Field(default_factory=list, description="需要的变量")
+
+
+class ArchitectureDesign(BaseModel):
+    """架构设计"""
+    new_classes: List[str] = Field(default_factory=list, description="新增的类及职责")
+    modified_classes: List[str] = Field(default_factory=list, description="修改的类及内容")
+    class_relationships: str = Field(default="", description="类之间的关系和依赖")
+    data_flow: str = Field(default="", description="数据流向说明")
+
+
 class Verdict(BaseModel):
     """判决书"""
     case_id: str = Field(..., description="案件编号")
@@ -140,6 +158,10 @@ class Verdict(BaseModel):
     approved_changes: List[str] = Field(default_factory=list, description="批准的变更")
     rejected_changes: List[str] = Field(default_factory=list, description="驳回的变更")
     conditions: List[str] = Field(default_factory=list, description="附加条件")
+
+    # 技术设计（新增）
+    architecture_design: Optional[ArchitectureDesign] = Field(None, description="架构设计")
+    function_design: List[FunctionDesign] = Field(default_factory=list, description="函数级别设计")
 
     # 执行指令
     execution_plan: List[str] = Field(default_factory=list, description="执行计划")

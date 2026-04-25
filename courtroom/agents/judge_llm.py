@@ -80,20 +80,74 @@ class JudgeLLM:
   "verdict_type": "approved|rejected|approved_with_modifications|deferred",
   "reasoning": "判决理由（200-300字）",
   "approved_changes": ["批准的变更1", "批准的变更2", ...],
-  "execution_plan": ["执行步骤1", "执行步骤2", ...]
+  "architecture_design": {{
+    "new_classes": ["类名1: 职责描述", "类名2: 职责描述"],
+    "modified_classes": ["类名: 修改内容"],
+    "class_relationships": "类之间的关系和依赖",
+    "data_flow": "数据流向说明"
+  }},
+  "function_design": [
+    {{
+      "file": "文件路径",
+      "function_name": "函数名",
+      "signature": "完整的函数签名（包含参数和返回值）",
+      "purpose": "函数职责",
+      "key_logic": "关键逻辑描述或伪代码",
+      "variables": ["需要的变量1", "需要的变量2"]
+    }}
+  ],
+  "execution_plan": [
+    "步骤1: 在 file.py 中添加/修改 ClassName 类",
+    "步骤2: 实现 method_name(params) 方法，逻辑：...",
+    "步骤3: 添加变量 var_name，用于...",
+    "步骤4: 在 another_file.py 中调用新方法",
+    "步骤5: 编写测试用例验证功能"
+  ]
 }}
 
 判决应该：
 1. 综合考虑双方论点和陪审团意见
 2. 给出清晰的理由
-3. 如果批准，提供具体的执行计划
-4. 如果有条件批准，明确列出条件
-5. 保持公正和专业"""
+3. **如果批准，必须提供详细的技术设计**：
+   - 架构设计：需要哪些类/模块，它们的关系
+   - 函数设计：每个函数的签名、职责、关键逻辑（函数级别，不需要逐行代码）
+   - 执行计划：详细的分步实施计划，明确每步在哪个文件做什么
+4. 执行计划要足够详细，让执行 Agent 能直接按照计划实施，不需要自己设计架构
+5. 如果有条件批准，明确列出条件
+6. 保持公正和专业
+
+**重要**：execution_plan 必须是具体的、可操作的步骤，不要写"实施批准的变更"这种模糊描述。
+每一步都要明确：在哪个文件、做什么操作、涉及哪些函数/类/变量。"""
 
         system = "你是一位经验丰富的法官，擅长综合各方意见做出公正的判决。"
 
         try:
             result = self.llm.generate_json(prompt, system=system)
+
+            # 解析架构设计
+            from ..schemas import ArchitectureDesign, FunctionDesign
+            arch_design = None
+            if "architecture_design" in result:
+                arch_data = result["architecture_design"]
+                arch_design = ArchitectureDesign(
+                    new_classes=arch_data.get("new_classes", []),
+                    modified_classes=arch_data.get("modified_classes", []),
+                    class_relationships=arch_data.get("class_relationships", ""),
+                    data_flow=arch_data.get("data_flow", "")
+                )
+
+            # 解析函数设计
+            func_designs = []
+            if "function_design" in result:
+                for func_data in result["function_design"]:
+                    func_designs.append(FunctionDesign(
+                        file=func_data.get("file", ""),
+                        function_name=func_data.get("function_name", ""),
+                        signature=func_data.get("signature", ""),
+                        purpose=func_data.get("purpose", ""),
+                        key_logic=func_data.get("key_logic", ""),
+                        variables=func_data.get("variables", [])
+                    ))
 
             return Verdict(
                 case_id=motion.case_id,
@@ -101,7 +155,9 @@ class JudgeLLM:
                 reasoning=result["reasoning"],
                 approved_changes=result.get("approved_changes", motion.proposed_changes),
                 execution_plan=result.get("execution_plan", []),
-                conditions=result.get("conditions", [])
+                conditions=result.get("conditions", []),
+                architecture_design=arch_design,
+                function_design=func_designs
             )
         except Exception as e:
             print(f"⚠️ LLM 判决生成失败，回退到规则引擎: {e}")

@@ -1,0 +1,12 @@
+{
+  "case_id": "case_20260425_204043",
+  "checked_at": "2026-04-25T20:40:44.284040",
+  "passed": false,
+  "test_results": {},
+  "code_quality_issues": [],
+  "security_issues": [],
+  "performance_issues": [],
+  "recommendations": [],
+  "should_retry": true,
+  "retry_reason": "执行失败: 无法加载 Motion 信息"
+}

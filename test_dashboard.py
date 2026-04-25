@@ -9,7 +9,7 @@ def test_dashboard():
     """测试经济驾驶舱"""
     print("🧪 测试经济驾驶舱\n")
 
-    courtroom_root = Path("/home/sevenstars/CLionProjects/Oasis/courtroom")
+    courtroom_root = Path("/home/sevenstars/CLionProjects/courtroom/courtroom")
     dashboard = EconomicsDashboard(courtroom_root, monthly_budget=5.0)
 
     # 测试 1: 记录成本

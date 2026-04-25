@@ -1,0 +1,24 @@
+{
+  "case_id": "case_20260425_183845",
+  "analyzed_at": "2026-04-25T18:38:45.812301",
+  "codebase_structure": {
+    "total_files": 4056,
+    "python_files": 1828,
+    "test_files": 15,
+    "directories": [
+      "__pycache__",
+      "courtroom"
+    ],
+    "has_tests": true,
+    "has_requirements": true,
+    "has_git": true
+  },
+  "relevant_files": [],
+  "dependencies": [],
+  "potential_issues": [],
+  "recommendations": [],
+  "complexity_score": 5,
+  "risk_assessment": "中等风险",
+  "estimated_effort": "medium",
+  "raw_analysis": "分析失败: "
+}

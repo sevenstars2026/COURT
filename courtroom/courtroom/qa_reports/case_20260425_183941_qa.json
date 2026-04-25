@@ -1,0 +1,12 @@
+{
+  "case_id": "case_20260425_183941",
+  "checked_at": "2026-04-25T18:39:42.686471",
+  "passed": false,
+  "test_results": {},
+  "code_quality_issues": [],
+  "security_issues": [],
+  "performance_issues": [],
+  "recommendations": [],
+  "should_retry": true,
+  "retry_reason": "执行失败: Claude Code 执行失败: Claude Code 调用异常: 'Verdict' object has no attribute 'motion'"
+}

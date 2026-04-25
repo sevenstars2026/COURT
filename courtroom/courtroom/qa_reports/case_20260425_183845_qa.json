@@ -1,0 +1,12 @@
+{
+  "case_id": "case_20260425_183845",
+  "checked_at": "2026-04-25T18:46:23.637631",
+  "passed": false,
+  "test_results": {},
+  "code_quality_issues": [],
+  "security_issues": [],
+  "performance_issues": [],
+  "recommendations": [],
+  "should_retry": true,
+  "retry_reason": "执行失败: Claude Code 执行失败: Claude Code 执行超时（5分钟）"
+}

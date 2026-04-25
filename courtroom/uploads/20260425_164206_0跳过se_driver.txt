@@ -1,0 +1,533 @@
+// =======================================================================================================
+// 模块名称: se_driver
+// 功能说明:
+//     空间引擎驱动: 乒乓读取权重, 计分板控制下流水线读取脉冲和膜电位(需要膜电位取址)并输入至空间引擎模块,
+//                  接收空间引擎的膜电位并写入膜电位缓存.
+// 接口定义:
+//   - ping_pong_rd_sel: 当前需要读权重的乒/乓标志;
+//   - input_channels, out_fmap_width, out_fmap_height, l_shift_bitnum: 所需层参数;
+//   - spike_s_*: 脉冲缓存接口;
+//   - weight_bram_*: 权重缓存接口;
+//   - vm_*: 膜电位缓存接口;
+//   - *_to_se, *_by_se: 与空间引擎交互接口;
+//   - se_driver_*: 模块状态接口.
+// 交互方式:
+//   - 模块驱动: 上级模块通过高电平脉冲信号 se_driver_start 驱动;
+//   - 模块输出: 处理完当前层一个时间步的所有输入通道脉冲后输出结束信号 se_driver_done.
+// =======================================================================================================
+module se_driver(
+    input  logic                                clk,
+    input  logic                                rst_n,
+
+    input  logic                                ping_pong_rd_sel,
+
+    // =======================================================================
+    // 1. 参数
+    // =======================================================================
+    input  logic [9:0]                          input_channels,
+    input  logic [7:0]                          out_fmap_width,
+    input  logic [7:0]                          out_fmap_height,
+    input  logic [1:0]                          l_shift_bitnum,
+
+    // =======================================================================
+    // 2. 脉冲 FIFO 读接口 (4个 Bank)
+    // =======================================================================
+    input  logic [SPIKE_DATA_BIT-1:0]           spike_s_axis_tdata  [SPIKE_CACHE_BANK_NUM-1:0],
+    input  logic                                spike_s_axis_tvalid [SPIKE_CACHE_BANK_NUM-1:0],
+    output logic                                spike_s_axis_tready [SPIKE_CACHE_BANK_NUM-1:0],
+
+    // =======================================================================
+    // 3. 权重缓存读接口 (18个Bank)
+    // =======================================================================
+    output logic [W_ADDR_BIT-1:0]               weight_bram_addrb [W_CAHE_BANK_NUM-1:0],
+    output logic                                weight_bram_enb   [W_CAHE_BANK_NUM-1:0],
+    input  logic [W_DATA_BIT-1:0]               weight_bram_doutb [W_CAHE_BANK_NUM-1:0],
+
+    // =======================================================================
+    // 4. 膜电位缓存 (LUTRAM) 读写接口 (16 个 SE, 每个 16 Bank)
+    // =======================================================================
+    output logic [VM_ADDR_BIT-1:0]              vm_dpra [NS-1:0][VM_BANK_NUM_PER_SE-1:0], 
+    input  logic [VM_DATA_BIT-1:0]              vm_dpo  [NS-1:0][VM_BANK_NUM_PER_SE-1:0], 
+    
+    output logic [VM_ADDR_BIT-1:0]              vm_a    [NS-1:0][VM_BANK_NUM_PER_SE-1:0], 
+    output logic [VM_DATA_BIT-1:0]              vm_d    [NS-1:0][VM_BANK_NUM_PER_SE-1:0], 
+    output logic                                vm_we   [NS-1:0][VM_BANK_NUM_PER_SE-1:0], 
+
+    // =======================================================================
+    // 5. 空间引擎 (Spatial Engine) 交互接口
+    // =======================================================================
+    output logic                                valid_to_se,
+    output logic [W_DATA_BIT-1:0]               weight_to_se [NS-1:0][W_NUM_PER_CONV_KERNEL-1:0],
+    output logic [VM_DATA_BIT-1:0]              vmem_to_se   [NS-1:0][VM_BANK_NUM_PER_SE-1:0],
+    input  logic                                valid_by_se  [NS-1:0],      
+    input  logic [VM_DATA_BIT-1:0]              vmem_by_se   [NS-1:0][VM_BANK_NUM_PER_SE-1:0],
+    output logic [AER_TILE_BITMAP_BIT-1:0]      bitmap_to_se,
+    output logic [AER_TILE_S_BIT-1:0]           s_in_to_se,
+
+    // =======================================================================
+    // 6. 模块状态接口
+    // =======================================================================
+    input  logic                                se_driver_start,
+    output logic                                se_driver_busy,
+    output logic                                se_driver_done
+);
+
+    // =======================================================================
+    // 模块忙/结束状态
+    // =======================================================================
+    always_ff @(posedge clk or negedge rst_n)
+        if (~rst_n)
+            se_driver_busy <= 1'b0;
+        else if (se_driver_start)
+            se_driver_busy <= 1'b1;
+        else if (se_driver_done)
+            se_driver_busy <= 1'b0;
+
+    // =======================================================================
+    // 状态机定义
+    // =======================================================================
+    typedef enum logic [2:0] {
+        IDLE,
+        CHECK_CHANNEL,   // 检查当前通道是否有脉冲
+        LOAD_WEIGHT,     // 为有效通道加载权重
+        SPIKE_PROCESS,   // 处理有效通道的脉冲
+        WAIT_DRAIN       // 排空流水线后结束
+    } state_t;
+    state_t state;
+
+    logic [9:0]  ic_cnt; 
+
+    // =======================================================================
+    // 权重乒乓缓存（保留乒乓结构，但改为按需加载）
+    // =======================================================================
+    logic [W_DATA_BIT-1:0] weight_reg [0:1][NS-1:0][W_NUM_PER_CONV_KERNEL-1:0];
+    logic inner_pp_rd;          // 供空间引擎读取的缓存指针
+    logic inner_pp_wr;          // 供权重加载写入的缓存指针
+
+    // =======================================================================
+    // 权重加载控制（按需加载，非预取）
+    // =======================================================================
+    logic [3:0] w_rd_cnt; 
+    logic [3:0] w_wr_cnt; 
+    logic       weight_loading;      // 正在加载权重标志
+    logic       load_weight_start;   // 启动权重加载脉冲
+    logic       w_valid_shift;       // 权重数据有效伴随信号
+
+    // 读权重物理地址（基于当前通道 ic_cnt）
+    logic [W_ADDR_BIT-1:0] w_logic_addr;
+    logic [W_ADDR_BIT-2:0] w_local_addr;
+    assign w_logic_addr = (ic_cnt << 4) + w_rd_cnt; 
+    assign w_local_addr = w_logic_addr[W_ADDR_BIT-2:0];
+
+    // 权重加载微线程
+    always_ff @(posedge clk or negedge rst_n) begin
+        if (!rst_n) begin
+            w_rd_cnt        <= '0;
+            weight_loading  <= 1'b0;
+            w_valid_shift   <= 1'b0;
+            for (int b=0; b < W_CAHE_BANK_NUM; b++) begin
+                weight_bram_enb[b]   <= 1'b0;
+                weight_bram_addrb[b] <= '0;
+            end
+        end else begin
+            if (load_weight_start) begin
+                weight_loading <= 1'b1;
+                w_rd_cnt       <= '0;
+            end
+
+            // 发出16个BRAM读请求
+            if (weight_loading) begin
+                w_rd_cnt <= w_rd_cnt + 1'b1;
+                for (int b=0; b < W_CAHE_BANK_NUM; b++) begin
+                    weight_bram_enb[b]   <= 1'b1;
+                    weight_bram_addrb[b] <= {ping_pong_rd_sel, w_local_addr};
+                end
+                if (w_rd_cnt == 4'd15) begin
+                    weight_loading <= 1'b0;
+                end
+            end else begin
+                for (int b=0; b < W_CAHE_BANK_NUM; b++) 
+                    weight_bram_enb[b] <= 1'b0;
+            end
+
+            // 产生与数据同频的 valid 信号
+            w_valid_shift <= weight_bram_enb[0];
+        end
+    end
+
+    // 权重写入乒乓缓存的后台区
+    logic [W_ADDR_BIT-1:0] w_wr_logic_addr;
+    logic                  w_wr_is_cross;
+    assign w_wr_logic_addr = (ic_cnt << 4) + w_wr_cnt;
+    assign w_wr_is_cross   = w_wr_logic_addr[W_ADDR_BIT-1];
+
+    always_ff @(posedge clk or negedge rst_n) begin
+        if (!rst_n) begin
+            w_wr_cnt <= '0;
+        end else begin
+            if (load_weight_start) begin
+                w_wr_cnt <= '0;
+            end else if (w_valid_shift) begin
+                for (int i = 0; i < 9; i++) begin
+                    weight_reg[inner_pp_wr][w_wr_cnt][i] <= w_wr_is_cross ? 
+                        weight_bram_doutb[i*2+1] : weight_bram_doutb[i*2];
+                end
+                w_wr_cnt <= w_wr_cnt + 1'b1;
+            end
+        end
+    end
+
+    // =======================================================================
+    // 计分板与 RAW 冒险检测（与原版相同）
+    // =======================================================================
+    logic [1:0] poll_bank; 
+    logic [2:0] cend_cnt;  
+    
+    logic current_fifo_valid;
+    logic [SPIKE_DATA_BIT-1:0] current_tdata;
+    
+    assign current_fifo_valid = spike_s_axis_tvalid[poll_bank];
+    assign current_tdata      = spike_s_axis_tdata[poll_bank];
+    
+    logic [AER_TILE_X_BIT-1:0] x_tile;
+    logic [AER_TILE_Y_BIT-1:0] y_tile;
+    logic [AER_TILE_S_BIT-1:0] s_in;
+    logic [AER_TILE_I_BIT-1:0] i_in;
+    logic [AER_TILE_J_BIT-1:0] j_in;
+
+    assign x_tile = current_tdata[AER_TILE_BITMAP_BIT + AER_TILE_Y_BIT +: AER_TILE_X_BIT];
+    assign y_tile = current_tdata[AER_TILE_BITMAP_BIT +: AER_TILE_Y_BIT];
+    assign s_in   = {y_tile[0], x_tile[0]};
+    assign i_in   = x_tile[AER_TILE_X_BIT-1 : 1];
+    assign j_in   = y_tile[AER_TILE_Y_BIT-1 : 1];
+
+    logic is_cend;
+    assign is_cend = (current_tdata[AER_TILE_BIT-1:0] == CEDN);
+
+    localparam SCOREBOARD_DEPTH = 3 + SE_PIPELINE_DEPTH; 
+    
+    logic [SCOREBOARD_DEPTH-1:0]       scoreboard_valid;
+    logic [AER_TILE_X_BIT-1:0]         scoreboard_x [SCOREBOARD_DEPTH-1:0];
+    logic [AER_TILE_Y_BIT-1:0]         scoreboard_y [SCOREBOARD_DEPTH-1:0];
+    
+    logic raw_hazard;
+    logic [AER_TILE_X_BIT:0] target_x_plus;  
+    logic [AER_TILE_X_BIT:0] target_x_minus;
+    logic [AER_TILE_Y_BIT:0] target_y_plus;
+    logic [AER_TILE_Y_BIT:0] target_y_minus;
+    
+    assign target_x_plus  = {1'b0, x_tile} + 1'b1;
+    assign target_x_minus = {1'b0, x_tile} - 1'b1;
+    assign target_y_plus  = {1'b0, y_tile} + 1'b1;
+    assign target_y_minus = {1'b0, y_tile} - 1'b1;
+
+    logic [SCOREBOARD_DEPTH-1:0] hazard_vector;
+
+    always_comb begin
+        for (int i = 0; i < SCOREBOARD_DEPTH; i++) begin
+            automatic logic x_hit;
+            automatic logic y_hit;
+            
+            x_hit = ({1'b0, scoreboard_x[i]} == {1'b0, x_tile}) || 
+                    ({1'b0, scoreboard_x[i]} == target_x_plus)  || 
+                    ({1'b0, scoreboard_x[i]} == target_x_minus);
+                    
+            y_hit = ({1'b0, scoreboard_y[i]} == {1'b0, y_tile}) || 
+                    ({1'b0, scoreboard_y[i]} == target_y_plus)  || 
+                    ({1'b0, scoreboard_y[i]} == target_y_minus);
+            
+            hazard_vector[i] = scoreboard_valid[i] && x_hit && y_hit;
+        end
+    end
+
+    assign raw_hazard = |hazard_vector;
+
+    // 零通道检测信号
+    logic all_banks_valid;
+    logic all_banks_cend;
+    assign all_banks_valid = spike_s_axis_tvalid[0] && spike_s_axis_tvalid[1] && spike_s_axis_tvalid[2] && spike_s_axis_tvalid[3];
+    assign all_banks_cend  = (spike_s_axis_tdata[0][AER_TILE_BIT-1:0] == CEDN) &&
+                             (spike_s_axis_tdata[1][AER_TILE_BIT-1:0] == CEDN) &&
+                             (spike_s_axis_tdata[2][AER_TILE_BIT-1:0] == CEDN) &&
+                             (spike_s_axis_tdata[3][AER_TILE_BIT-1:0] == CEDN);
+
+    // FIFO tready 控制
+    always_comb begin
+        for (int i=0; i < SPIKE_CACHE_BANK_NUM; i++) spike_s_axis_tready[i] = 1'b0;
+        
+        if (state == CHECK_CHANNEL) begin
+            // 仅当4个Bank同时准备好且全部为CEND时，才弹出空通道的标志
+            if (all_banks_valid && all_banks_cend) begin
+                for (int i=0; i < SPIKE_CACHE_BANK_NUM; i++) spike_s_axis_tready[i] = 1'b1;
+            end
+        end else if (state == SPIKE_PROCESS) begin
+            // 处理脉冲时，遇到CEND或没有RAW冒险时才弹出
+            if (is_cend || !raw_hazard) spike_s_axis_tready[poll_bank] = 1'b1;
+        end
+    end
+
+    logic pop_valid;
+    assign pop_valid = (state == SPIKE_PROCESS) && current_fifo_valid && !is_cend && !raw_hazard;
+
+    // 更新计分板
+    always_ff @(posedge clk or negedge rst_n) begin
+        if (!rst_n) scoreboard_valid <= '0;
+        else begin
+            for (int i = SCOREBOARD_DEPTH-1; i > 0; i--) begin
+                scoreboard_valid[i] <= scoreboard_valid[i-1];
+                scoreboard_x[i]     <= scoreboard_x[i-1];
+                scoreboard_y[i]     <= scoreboard_y[i-1];
+            end
+            scoreboard_valid[0] <= pop_valid;
+            scoreboard_x[0]     <= x_tile;
+            scoreboard_y[0]     <= y_tile;
+        end
+    end
+
+    // =======================================================================
+    // 流水线处理/跟踪（完全保留原逻辑）
+    // =======================================================================
+    (* rom_style = "distributed" *) logic [VM_BANK_ADDR_S_DATA_BIT-1:0] vm_bank_addr_s_rom [0:VM_BANK_ADDR_S_ROM_DEPTH-1] = 
+    '{64'b0000_0000_0000_1100_0000_0000_0000_1100_0000_0000_0000_1100_0011_0011_0011_1111, 
+      64'b0100_0000_0000_0000_0100_0000_0000_0000_0100_0000_0000_0000_0111_0011_0011_0011,
+      64'b0001_0001_0001_1101_0000_0000_0000_1100_0000_0000_0000_1100_0000_0000_0000_1100,
+      64'b0101_0001_0001_0001_0100_0000_0000_0000_0100_0000_0000_0000_0100_0000_0000_0000};
+      
+    // Tick 1
+    logic t1_valid;
+    logic [AER_TILE_X_BIT-1:0] t1_x;
+    logic [AER_TILE_Y_BIT-1:0] t1_y;
+    logic [AER_TILE_I_BIT-1:0] t1_i_in;
+    logic [AER_TILE_J_BIT-1:0] t1_j_in;
+    logic [0:VM_BANK_NUM_PER_SE-1][0:1][1:0] t1_vm_bank_addr_s; 
+    logic [AER_TILE_BITMAP_BIT-1:0] t1_bitmap;
+    logic [AER_TILE_S_BIT-1:0]      t1_s_in;
+    logic t1_pp_rd; 
+
+    always_ff @(posedge clk) begin
+        t1_valid <= pop_valid;
+        if (pop_valid) begin
+            t1_x                <= x_tile;
+            t1_y                <= y_tile;
+            t1_i_in             <= i_in;
+            t1_j_in             <= j_in;
+            t1_vm_bank_addr_s   <= vm_bank_addr_s_rom[s_in];
+            t1_bitmap           <= current_tdata[AER_TILE_BITMAP_BIT-1:0];
+            t1_s_in             <= s_in;
+            t1_pp_rd            <= inner_pp_rd; 
+        end
+    end
+
+    // Tick 2 的地址与掩码计算
+    logic [VM_BANK_NUM_PER_SE-1:0] mask_calc;
+    logic [VM_ADDR_BIT-1:0]        t2_rdaddr_calc [VM_BANK_NUM_PER_SE-1:0];
+
+    logic [AER_TILE_X_BIT-1:0] x_max;
+    logic [AER_TILE_Y_BIT-1:0] y_max;
+    logic                      is_1x1_layer;
+    logic                      is_2x2_layer;
+
+    always_ff @(posedge clk or negedge rst_n) begin
+        if (!rst_n) begin
+            x_max        <= '0;
+            y_max        <= '0;
+            is_1x1_layer <= 1'b0;
+            is_2x2_layer <= 1'b0;
+        end else if (se_driver_start) begin
+            x_max        <= (out_fmap_width >> 1) - 1'b1;
+            y_max        <= (out_fmap_height >> 1) - 1'b1;
+            is_1x1_layer <= (out_fmap_width == 8'd1) && (out_fmap_height == 8'd1);
+            is_2x2_layer <= (out_fmap_width == 8'd2) && (out_fmap_height == 8'd2);
+        end
+    end
+
+    logic is_top_left, is_top_right, is_bottom_left, is_bottom_right;
+    logic is_top_edge, is_bottom_edge, is_left_edge, is_right_edge;
+    assign is_top_left     = (t1_x == '0) && (t1_y == '0);
+    assign is_top_right    = (t1_x == x_max) && (t1_y == '0);
+    assign is_bottom_left  = (t1_x == '0) && (t1_y == y_max);
+    assign is_bottom_right = (t1_x == x_max) && (t1_y == y_max);
+    assign is_top_edge    = (t1_y == '0);
+    assign is_bottom_edge = (t1_y == y_max);
+    assign is_left_edge   = (t1_x == '0);
+    assign is_right_edge  = (t1_x == x_max);
+
+    always_comb begin
+        if (is_1x1_layer)           mask_calc = 16'b0000_0000_0000_0001;
+        else if (is_2x2_layer)      mask_calc = 16'b0000_0000_0011_0011;
+        else if (is_top_left)       mask_calc = 16'b0000_0111_0111_0111;
+        else if (is_top_right)      mask_calc = 16'b0000_1110_1110_1110;
+        else if (is_bottom_left)    mask_calc = 16'b0111_0111_0111_0000;
+        else if (is_bottom_right)   mask_calc = 16'b1110_1110_1110_0000;
+        else if (is_top_edge)       mask_calc = 16'b0000_1111_1111_1111;
+        else if (is_bottom_edge)    mask_calc = 16'b1111_1111_1111_0000; 
+        else if (is_left_edge)      mask_calc = 16'b0111_0111_0111_0111;
+        else if (is_right_edge)     mask_calc = 16'b1110_1110_1110_1110;
+        else                        mask_calc = 16'b1111_1111_1111_1111;
+    end
+
+    always_comb begin
+        for(int i = 0; i < VM_BANK_NUM_PER_SE; i = i + 1) begin 
+            t2_rdaddr_calc[i] = ({{(VM_ADDR_BIT-AER_TILE_I_BIT){1'b0}}, t1_i_in} + {{(VM_ADDR_BIT-AER_TILE_S_BIT){t1_vm_bank_addr_s[i][0][1]}}, t1_vm_bank_addr_s[i][0]}) +
+                                (({{(VM_ADDR_BIT-AER_TILE_J_BIT){1'b0}}, t1_j_in} + {{(VM_ADDR_BIT-AER_TILE_S_BIT){t1_vm_bank_addr_s[i][1][1]}}, t1_vm_bank_addr_s[i][1]}) << l_shift_bitnum);
+        end
+    end
+
+    logic t2_valid;
+    logic [VM_BANK_NUM_PER_SE-1:0] t2_mask;
+    logic [VM_ADDR_BIT-1:0] t2_rdaddr [VM_BANK_NUM_PER_SE-1:0];
+    logic [AER_TILE_BITMAP_BIT-1:0] t2_bitmap;
+    logic [AER_TILE_S_BIT-1:0]      t2_s_in;
+    logic t2_pp_rd; 
+
+    always_ff @(posedge clk) begin
+        t2_valid  <= t1_valid;
+        t2_mask   <= mask_calc;
+        t2_bitmap <= t1_bitmap;
+        t2_s_in   <= t1_s_in;
+        t2_pp_rd  <= t1_pp_rd; 
+        for(int i = 0; i < VM_BANK_NUM_PER_SE; i = i + 1) begin 
+            t2_rdaddr[i] <= t2_rdaddr_calc[i];
+            for (int se=0; se<NS; se++) vm_dpra[se][i] <= t2_rdaddr_calc[i]; 
+        end
+    end
+
+    // Tick 3
+    logic t3_valid;
+    logic [AER_TILE_BITMAP_BIT-1:0] t3_bitmap;
+    logic [AER_TILE_S_BIT-1:0]      t3_s_in;
+    logic t3_pp_rd; 
+
+    always_ff @(posedge clk) begin
+        t3_valid  <= t2_valid;
+        t3_bitmap <= t2_bitmap;
+        t3_s_in   <= t2_s_in;
+        t3_pp_rd  <= t2_pp_rd; 
+    end
+
+    assign valid_to_se  = t3_valid;
+    assign vmem_to_se   = vm_dpo;
+    assign bitmap_to_se = t3_bitmap;
+    assign s_in_to_se   = t3_s_in;
+    assign weight_to_se = weight_reg[t3_pp_rd];
+
+    // =======================================================================
+    // 5. 写回闭环 (Writeback Delay Line)
+    // =======================================================================
+    localparam WB_DELAY = SE_PIPELINE_DEPTH + 1;
+    
+    logic [VM_ADDR_BIT-1:0]        wb_addr_shift [WB_DELAY-1:0][VM_BANK_NUM_PER_SE-1:0];
+    logic [VM_BANK_NUM_PER_SE-1:0] wb_mask_shift [WB_DELAY-1:0];
+
+    always_ff @(posedge clk) begin
+        for (int d = WB_DELAY-1; d > 0; d--) begin
+            wb_addr_shift[d] <= wb_addr_shift[d-1];
+            wb_mask_shift[d] <= wb_mask_shift[d-1];
+        end
+        wb_addr_shift[0] <= t2_rdaddr;
+        wb_mask_shift[0] <= t2_mask;
+    end
+
+    always_comb begin
+        for (int se = 0; se < NS; se++) begin
+            for (int b = 0; b < VM_BANK_NUM_PER_SE; b++) begin
+                vm_a[se][b]  = wb_addr_shift[WB_DELAY-1][b];
+                vm_d[se][b]  = vmem_by_se[se][b]; 
+                vm_we[se][b] = valid_by_se[se] && wb_mask_shift[WB_DELAY-1][b]; 
+            end
+        end
+    end
+
+    // =======================================================================
+    // 主状态机（新增 CHECK_CHANNEL，按需加载权重）
+    // =======================================================================
+    always_ff @(posedge clk or negedge rst_n) begin
+        if (!rst_n) begin
+            state            <= IDLE;
+            ic_cnt           <= '0;
+            poll_bank        <= '0;
+            cend_cnt         <= '0;
+            se_driver_done   <= 1'b0;
+            load_weight_start <= 1'b0;
+            inner_pp_rd      <= 1'b0;
+            inner_pp_wr      <= 1'b0;
+        end else begin
+            se_driver_done    <= 1'b0;
+            load_weight_start <= 1'b0;
+
+            case (state)
+                IDLE: begin
+                    if (se_driver_start) begin
+                        ic_cnt      <= '0;
+                        inner_pp_rd <= 1'b0;
+                        inner_pp_wr <= 1'b0;
+                        state       <= CHECK_CHANNEL;
+                    end
+                end
+
+                CHECK_CHANNEL: begin
+                    if (all_banks_valid) begin
+                        if (all_banks_cend) begin
+                            // 空通道：CEND会被组合逻辑弹出的同时，通道号加1
+                            if (ic_cnt == input_channels - 1) begin
+                                state <= WAIT_DRAIN;   // 最后一个通道也是空的，直接排空
+                            end else begin
+                                ic_cnt <= ic_cnt + 1'b1;
+                                // 保持 CHECK_CHANNEL，继续检查下一个通道
+                            end
+                        end else begin
+                            // 有脉冲，启动权重加载
+                            load_weight_start <= 1'b1;
+                            state <= LOAD_WEIGHT;
+                        end
+                    end
+                end
+
+                LOAD_WEIGHT: begin
+                    // 等待权重加载完毕（16拍后 w_wr_cnt 会到达15，最后一拍写完后可跳转）
+                    // 我们通过 w_valid_shift 与 w_wr_cnt 判断最后一拍写入完成，但更简洁：
+                    // 加载完成时，weight_loading 拉低且最后一拍数据已写入，可以直接跳转。
+                    // 这里用一个寄存器 next_weight_ready 来同步。
+                    // 由于 w_wr_cnt 在 w_valid_shift 后才会变成0，我们在加载启动后第17拍结束。
+                    // 简单方案：检测 w_valid_shift 的下降沿（即 weight_loading 刚变低）？ 
+                    // 为可靠，增加一个就绪信号。
+                    // 增加逻辑：当 w_wr_cnt == 15 且 w_valid_shift 为高时，产生加载完成标志。
+                    if (w_wr_cnt == 4'd15 && w_valid_shift) begin
+                        // 权重已全部写入 inner_pp_wr 区，切换指针，跳转到脉冲处理
+                        inner_pp_rd <= inner_pp_wr;
+                        inner_pp_wr <= ~inner_pp_wr;
+                        poll_bank   <= '0;
+                        cend_cnt    <= '0;
+                        state       <= SPIKE_PROCESS;
+                    end
+                end
+
+                SPIKE_PROCESS: begin
+                    if (current_fifo_valid && is_cend) begin
+                        if (cend_cnt == SPIKE_CACHE_BANK_NUM - 1) begin
+                            if (ic_cnt == input_channels - 1) begin
+                                state <= WAIT_DRAIN;
+                            end else begin
+                                ic_cnt <= ic_cnt + 1'b1;
+                                state  <= CHECK_CHANNEL;
+                            end
+                        end else begin
+                            poll_bank <= poll_bank + 1'b1;
+                            cend_cnt  <= cend_cnt + 1'b1;
+                        end
+                    end
+                end
+
+                WAIT_DRAIN: begin
+                    if (scoreboard_valid == '0) begin 
+                        se_driver_done <= 1'b1; 
+                        state          <= IDLE;
+                    end
+                end
+
+                default: state <= IDLE;
+            endcase
+        end
+    end
+
+endmodule
