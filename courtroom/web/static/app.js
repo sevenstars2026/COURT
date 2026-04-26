@@ -4,11 +4,27 @@ let currentCaseId = null;
 
 socket.on('connect', () => {
     console.log('✅ WebSocket 已连接');
+    // 如果有正在进行的庭审，重新订阅
+    if (currentCaseId) {
+        console.log('🔄 重新订阅案件:', currentCaseId);
+    }
+});
+
+socket.on('disconnect', () => {
+    console.log('❌ WebSocket 已断开');
+});
+
+socket.on('connect_error', (error) => {
+    console.error('❌ WebSocket 连接错误:', error);
 });
 
 socket.on('trial_progress', (data) => {
+    console.log('📨 收到 trial_progress:', data, '当前案件ID:', currentCaseId);
     if (currentCaseId && data.case_id === currentCaseId) {
+        console.log('✅ 更新进度');
         updateTrialProgress(data);
+    } else {
+        console.log('❌ 案件ID不匹配或未设置');
     }
 });
 

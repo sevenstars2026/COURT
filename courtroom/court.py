@@ -4,6 +4,7 @@
 from pathlib import Path
 from datetime import datetime
 from typing import Optional
+import json
 
 from .schemas import (
     Motion, TrialTranscript, MotionStatus, MotionType
@@ -248,7 +249,7 @@ class Court:
             if progress_callback: progress_callback("execution", 90, "执行工程师执行中")
 
             # 定义执行进度回调
-            def execution_progress(status, message):
+            def execution_progress(status, progress, message):
                 if progress_callback:
                     progress_callback(f"execution_{status}", 90, message)
 
@@ -437,10 +438,17 @@ class Court:
     def list_motions(self) -> list:
         """返回所有案件列表（用于 API）"""
         motions = []
-        for case_id in self.judge.state.active_cases + self.judge.state.completed_cases:
-            motion = self.judge.load_motion(case_id)
-            if motion:
-                motions.append(motion)
+        cases_dir = self.root / "cases"
+        if cases_dir.exists():
+            # 从文件系统加载所有案件
+            for case_file in sorted(cases_dir.glob("case_*.json"), reverse=True):
+                try:
+                    with open(case_file, "r", encoding="utf-8") as f:
+                        data = json.load(f)
+                        motion = Motion(**data)
+                        motions.append(motion)
+                except Exception as e:
+                    print(f"⚠️ 加载案件 {case_file.name} 失败: {e}")
         return motions
 
     def get_motion(self, case_id: str):

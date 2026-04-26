@@ -38,7 +38,7 @@ class ExecutionEngineer:
         初始化执行工程师
 
         Args:
-            project_root: 项目根目录
+            project_root: 项目根目录（courtroom目录）
             claude_cli: Claude Code CLI 路径
             copilot_cli: Copilot CLI 路径
             use_smart_strategy: 是否使用智能执行策略
@@ -46,9 +46,9 @@ class ExecutionEngineer:
         self.project_root = project_root
         self.claude_cli = claude_cli
         self.copilot_cli = copilot_cli
-        self.execution_log_dir = project_root / "courtroom" / "execution_logs"
+        self.execution_log_dir = project_root / "execution_logs"
         self.execution_log_dir.mkdir(parents=True, exist_ok=True)
-        self.cases_dir = project_root / "courtroom" / "cases"
+        self.cases_dir = project_root / "cases"
         self.output_manager = CodeOutputManager()
         self.use_smart_strategy = use_smart_strategy
         self.strategy_manager = StrategyManager(claude_cli, copilot_cli) if use_smart_strategy else None

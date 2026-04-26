@@ -23,9 +23,9 @@
     },
     "jury": {
       "mode": "api",
-      "url": "",
-      "api_key": "",
-      "model": ""
+      "url": "https://yunwu.ai/v1",
+      "api_key": "sk-lmpMnHvWglckbOwUXMkF91wBjx63ibgLcUcP8vR5nsdKvXF4",
+      "model": "gpt-5.4"
     }
   }
 }

@@ -1,0 +1,19 @@
+{
+  "case_id": "case_20260425_193817",
+  "retry_count": 0,
+  "timestamp": "2026-04-25T23:09:28.209865",
+  "error_type": "runtime_error",
+  "root_cause": "无法加载 Motion 信息",
+  "design_flaws": [
+    "判决缺少架构设计，可能导致实现不完整",
+    "判决缺少函数级别设计，可能导致实现细节错误"
+  ],
+  "missing_context": [],
+  "suggested_changes": [
+    "在判决中添加详细的架构设计",
+    "在判决中添加函数级别的设计细节"
+  ],
+  "additional_evidence_needed": false,
+  "should_retrial": true,
+  "max_retries_reached": false
+}

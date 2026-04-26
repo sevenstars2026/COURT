@@ -1,0 +1,13 @@
+{
+  "case_id": "case_20260425_183845",
+  "retry_count": 2,
+  "timestamp": "2026-04-25T23:09:09.523272",
+  "error_type": "",
+  "root_cause": "",
+  "design_flaws": [],
+  "missing_context": [],
+  "suggested_changes": [],
+  "additional_evidence_needed": false,
+  "should_retrial": false,
+  "max_retries_reached": true
+}

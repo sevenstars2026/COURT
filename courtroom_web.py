@@ -77,7 +77,17 @@ def call_openai_api(motion, api_conf, role_prompt, user_extra=""):
     if not api_conf:
         return None
     url = api_conf["url"].rstrip("/")
+
+    # 保存原始环境变量
+    old_env = {}
+    proxy_vars = ['HTTP_PROXY', 'HTTPS_PROXY', 'http_proxy', 'https_proxy', 'ALL_PROXY', 'all_proxy']
+    for var in proxy_vars:
+        if var in os.environ:
+            old_env[var] = os.environ[var]
+            del os.environ[var]
+
     try:
+        print(f"[DEBUG] 开始调用 API: {url}, model={api_conf['model']}")
         headers = {"Authorization": f"Bearer {api_conf['api_key']}", "Content-Type": "application/json"}
         payload = {
             "model": api_conf["model"],
@@ -86,40 +96,75 @@ def call_openai_api(motion, api_conf, role_prompt, user_extra=""):
                 {"role": "user", "content": f"动议标题：{motion.title}\n描述：{motion.description}\n{user_extra}"}
             ]
         }
-        resp = requests.post(f"{url}/chat/completions", headers=headers, json=payload, timeout=30)
+        resp = requests.post(f"{url}/chat/completions", headers=headers, json=payload, timeout=120)
+        print(f"[DEBUG] API 响应状态码: {resp.status_code}")
         if resp.status_code == 200:
-            return resp.json()["choices"][0]["message"]["content"]
+            result = resp.json()["choices"][0]["message"]["content"]
+            print(f"[DEBUG] API 返回内容长度: {len(result)}")
+            return result
+        else:
+            print(f"[DEBUG] API 返回错误: {resp.text[:500]}")
     except Exception as e:
-        print(f"API 调用失败: {e}")
+        print(f"[DEBUG] API 调用异常: {e}")
+        import traceback
+        traceback.print_exc()
+    finally:
+        # 恢复环境变量
+        for var, val in old_env.items():
+            os.environ[var] = val
     return None
 
 
 def call_openai_api_with_error(motion, api_conf, role_prompt, user_extra=""):
     """调用 API，失败时返回错误信息而不是静默退回"""
+    print(f"🔵 [API-ERROR] 开始调用 API: model={api_conf.get('model') if api_conf else 'None'}")
     if not api_conf:
+        print(f"❌ [API-ERROR] 未配置 API")
         return "错误: 未配置 API"
     url = api_conf["url"].rstrip("/")
-    # 重试一次
-    for attempt in range(2):
-        try:
-            headers = {"Authorization": f"Bearer {api_conf['api_key']}", "Content-Type": "application/json"}
-            payload = {
-                "model": api_conf["model"],
-                "messages": [
-                    {"role": "system", "content": role_prompt},
-                    {"role": "user", "content": f"动议标题：{motion.title}\n描述：{motion.description}\n{user_extra}"}
-                ]
-            }
-            resp = requests.post(f"{url}/chat/completions", headers=headers, json=payload, timeout=60)
-            if resp.status_code == 200:
-                return resp.json()["choices"][0]["message"]["content"]
-            else:
-                return f"错误: API 返回状态码 {resp.status_code} - {resp.text[:200]}"
-        except Exception as e:
-            if attempt == 0:
-                continue  # 重试一次
-            return f"错误: API 调用异常 - {e}"
-    return "错误: API 调用失败"
+
+    # 保存原始环境变量
+    old_env = {}
+    proxy_vars = ['HTTP_PROXY', 'HTTPS_PROXY', 'http_proxy', 'https_proxy', 'ALL_PROXY', 'all_proxy']
+    for var in proxy_vars:
+        if var in os.environ:
+            old_env[var] = os.environ[var]
+            del os.environ[var]
+
+    try:
+        # 重试一次
+        for attempt in range(2):
+            try:
+                print(f"🔵 [API-ERROR] 尝试 {attempt+1}/2: {url}/chat/completions")
+                headers = {"Authorization": f"Bearer {api_conf['api_key']}", "Content-Type": "application/json"}
+                payload = {
+                    "model": api_conf["model"],
+                    "messages": [
+                        {"role": "system", "content": role_prompt},
+                        {"role": "user", "content": f"动议标题：{motion.title}\n描述：{motion.description}\n{user_extra}"}
+                    ]
+                }
+                resp = requests.post(f"{url}/chat/completions", headers=headers, json=payload, timeout=120, proxies={'http': None, 'https': None})
+                print(f"✅ [API-ERROR] 收到响应: status={resp.status_code}")
+                if resp.status_code == 200:
+                    content = resp.json()["choices"][0]["message"]["content"]
+                    print(f"✅ [API-ERROR] 成功获取内容，长度={len(content)}")
+                    return content
+                else:
+                    error_msg = f"错误: API 返回状态码 {resp.status_code} - {resp.text[:200]}"
+                    print(f"❌ [API-ERROR] {error_msg}")
+                    return error_msg
+            except Exception as e:
+                print(f"❌ [API-ERROR] 异常: {e}")
+                if attempt == 0:
+                    print(f"🔄 [API-ERROR] 准备重试...")
+                    continue  # 重试一次
+                return f"错误: API 调用异常 - {e}"
+        return "错误: API 调用失败"
+    finally:
+        # 恢复环境变量
+        for var, val in old_env.items():
+            os.environ[var] = val
 
 
 # ====== Agent 状态 ======
@@ -200,13 +245,52 @@ def make_progress_callback(case_id):
 def load_evidence_text(case_id):
     """加载案件的上传证据，拼接成文本"""
     try:
-        evs = evidence_manager.list_evidence(case_id)
+        print(f"[DEBUG] load_evidence_text 开始，case_id={case_id}")
         parts = []
+
+        # 1. 从证据管理器加载
+        evs = evidence_manager.list_evidence(case_id)
+        print(f"[DEBUG] 从证据管理器获取到 {len(evs)} 个证据")
         for ev in evs:
             if ev.content and len(ev.content.strip()) > 10:
                 parts.append(f"=== {ev.title} ===\n{ev.content[:8000]}")
-        return "\n\n".join(parts)
-    except:
+
+        # 2. 从案件的 affected_files 加载
+        motion = court.get_motion(case_id)
+        if motion and motion.affected_files:
+            print(f"[DEBUG] 案件有 {len(motion.affected_files)} 个 affected_files")
+            for file_path in motion.affected_files:
+                try:
+                    # 支持相对路径和绝对路径
+                    if file_path.startswith('/'):
+                        full_path = Path(file_path)
+                    else:
+                        # 去掉可能的 courtroom/ 前缀，避免重复
+                        clean_path = file_path
+                        if clean_path.startswith('courtroom/'):
+                            clean_path = clean_path[len('courtroom/'):]
+                        full_path = courtroom_root / clean_path
+
+                    if full_path.exists():
+                        print(f"[DEBUG] 读取文件: {full_path}")
+                        with open(full_path, 'r', encoding='utf-8', errors='ignore') as f:
+                            content = f.read()
+                            # 限制单个文件大小
+                            if len(content) > 50000:
+                                content = content[:50000] + "\n... (文件过大，已截断)"
+                            parts.append(f"=== {full_path.name} ===\n{content}")
+                    else:
+                        print(f"[DEBUG] 文件不存在: {full_path}")
+                except Exception as e:
+                    print(f"[DEBUG] 读取文件 {file_path} 失败: {e}")
+
+        result = "\n\n".join(parts)
+        print(f"[DEBUG] load_evidence_text 完成，返回长度={len(result)}")
+        return result
+    except Exception as e:
+        print(f"[DEBUG] load_evidence_text 异常: {e}")
+        import traceback
+        traceback.print_exc()
         return ""
 
 
@@ -215,8 +299,11 @@ def setup_agents_for_trial(case_id=""):
     from courtroom.schemas import Argument, ArgumentType
     from datetime import datetime
 
+    print(f"[DEBUG] setup_agents_for_trial 开始，case_id={case_id}")
     used_api = False
+    print(f"[DEBUG] 准备调用 load_evidence_text")
     code = load_evidence_text(case_id)
+    print(f"[DEBUG] load_evidence_text 完成，code 长度={len(code)}")
 
     api_p = get_agent_api("prosecutor")
     if api_p:
@@ -314,10 +401,14 @@ def background_trial(case_id):
 def background_trial_with_websocket(case_id):
     """后台运行庭审（使用 WebSocket 推送进度）"""
     try:
+        print(f"[DEBUG] 开始庭审 {case_id}")
+        print(f"[DEBUG] 步骤 1: 设置 Agents")
         setup_agents_for_trial(case_id)
+        print(f"[DEBUG] 步骤 2: Agents 设置完成")
 
         def ws_progress_callback(phase, summary):
             """通过 WebSocket 推送进度"""
+            print(f"[DEBUG] 进度回调: {phase} - {summary}")
             with trial_lock:
                 if case_id not in trial_progress:
                     trial_progress[case_id] = {"lines": [], "status": "running"}
@@ -325,13 +416,18 @@ def background_trial_with_websocket(case_id):
                 trial_progress[case_id]["summary"] = summary
 
             # 推送到 WebSocket
-            socketio.emit('trial_progress', {
+            progress_data = {
                 'case_id': case_id,
-                'stage': phase,
-                'message': summary
-            }, namespace='/')
+                'phase': phase,
+                'summary': summary
+            }
+            print(f"📤 [WebSocket] 准备发送消息: {progress_data}")
+            socketio.emit('trial_progress', progress_data, namespace='/')
+            print(f"✅ [WebSocket] 消息已发送")
 
+        print(f"[DEBUG] 步骤 3: 开始调用 court.trial()")
         result = court.trial(case_id, max_rounds=2, on_progress=ws_progress_callback)
+        print(f"[DEBUG] 步骤 4: court.trial() 完成")
 
         with trial_lock:
             trial_progress[case_id] = {
@@ -344,11 +440,15 @@ def background_trial_with_websocket(case_id):
         # 推送完成消息
         socketio.emit('trial_progress', {
             'case_id': case_id,
-            'stage': 'completed',
-            'message': '庭审结束'
+            'status': 'done',
+            'phase': 'completed',
+            'summary': '庭审结束'
         }, namespace='/')
 
     except Exception as e:
+        print(f"[DEBUG] 错误: {e}")
+        import traceback
+        traceback.print_exc()
         with trial_lock:
             trial_progress[case_id] = {
                 "status": "error",
@@ -360,8 +460,9 @@ def background_trial_with_websocket(case_id):
         # 推送错误消息
         socketio.emit('trial_progress', {
             'case_id': case_id,
-            'stage': 'error',
-            'message': f'出错: {e}'
+            'status': 'error',
+            'phase': 'error',
+            'summary': f'出错: {e}'
         }, namespace='/')
 
 
@@ -652,6 +753,14 @@ def start_trial_async(case_id):
                 "case_id": case_id
             }
 
+        # 立即发送初始进度到 WebSocket
+        print(f"📤 [WebSocket] 发送初始进度消息: case_id={case_id}")
+        socketio.emit('trial_progress', {
+            'case_id': case_id,
+            'phase': 'starting',
+            'summary': '准备开庭'
+        }, namespace='/')
+
         # 后台线程跑庭审（使用 WebSocket 推送进度）
         t = threading.Thread(target=background_trial_with_websocket, args=(case_id,), daemon=True)
         t.start()
@@ -896,5 +1005,5 @@ if __name__ == '__main__':
     print("   redis-server")
     print("   celery -A courtroom.tasks worker --loglevel=info")
 
-    # 使用 eventlet 运行
-    socketio.run(app, host='0.0.0.0', port=5000, debug=True)
+    # 使用 threading 模式运行
+    socketio.run(app, host='0.0.0.0', port=5000, debug=True, allow_unsafe_werkzeug=True)

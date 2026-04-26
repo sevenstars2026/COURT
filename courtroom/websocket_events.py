@@ -1,8 +1,9 @@
 """WebSocket 事件处理"""
 from flask_socketio import SocketIO, emit, join_room, leave_room
+from flask import request
 from typing import Dict, Any
 
-socketio = SocketIO(cors_allowed_origins="*", async_mode='eventlet')
+socketio = SocketIO(cors_allowed_origins="*", async_mode='threading')
 
 # 活跃的任务房间
 active_rooms: Dict[str, set] = {}
